@@ -1,0 +1,118 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+```{r}
+library(Seurat)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+#Load Data
+```{r}
+seurat <- readRDS("../seurat_processed.rds")
+```
+
+#Mixed Data
+
+```{r}
+my_levels<-c(3,2,5,1,0,4,8,6,7,9)
+seurat@active.ident <- factor(seurat@active.ident, levels = my_levels)
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7,8,9)
+new.cluster.ids <- c("Immature Neurons ", "Transitional Cells", "RGP2", "RGP1", "Mature Neurons", "Intermediate Progenitors", "Interneurons", "Endothelial Cells", "Layer I Neurons", "Perycites/Endothelial Cells")
+seurat@active.ident <- plyr::mapvalues(x = seurat@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+DimPlot(seurat)
+```
+
+#Total Cell Population
+```{r}
+
+DefaultAssay(seurat) <- "RNA"
+data <- seurat@meta.data
+data$UMAP1 <- Embeddings(seurat, 'umap')[,1]
+data$UMAP2 <- Embeddings(seurat, 'umap')[,2]
+data$PC1 <- Embeddings(seurat, 'pca')[,1]
+data$PC2 <- Embeddings(seurat, 'pca')[,2]
+data <-tidyr::separate(data, Barcode, c("CellID"), sep="-", extra="merge")
+data$Barcode <- rownames(data)
+data$Barcode <- gsub("-1","x", data$Barcode)
+data$Barcode <-paste0("Mix-SC:", data$Barcode)
+
+annotation <- data.frame(CellID = c("Bar1", "Bar2", "Bar3", "Bar4","Negative", "Doublet"),
+                         "Group" = c("Control", "Control", "Treatment", "Treatment","Negative", "Doublet"))
+data <- dplyr::left_join(data, annotation, by="CellID")
+
+write.csv(data, file=paste0("../seurat_metadata.csv"), quote=F,
+          row.names = F)
+write.csv(rownames(seurat), file="../seurat_genes.csv", quote=F,
+          row.names = F)
+
+#Control and Mercury Split
+data_con  <- filter(data, Group == "Control")
+data_merc <- filter(data, Group == "Treatment")
+
+write.csv(data_con, file=paste0("../Control_mix_metadata.csv"), quote=F,
+          row.names = F)
+
+write.csv(data_merc, file=paste0("../Mercury_mix_metadata.csv"), quote=F,
+          row.names = F)
+```
+
+
+#Transitional Cells Only
+```{r}
+seurat_cluster1 <- subset(seurat,idents=c("Transitional Cells"))
+seurat_cluster1 <- SCTransform(seurat_cluster1, vars.to.regress="percent.mito")
+seurat_cluster1 <- RunPCA(seurat_cluster1, verbose=F)
+seurat_cluster1 <- RunUMAP(seurat_cluster1, dims=1:30)
+seurat_cluster1 <- FindNeighbors(seurat_cluster1, dims=1:30)
+seurat_cluster1 <- FindClusters(seurat_cluster1, resolution=0.2)
+DimPlot(seurat_cluster1)
+```
+
+```{r}
+current.cluster.ids <- c(0, 1, 2, 3)
+new.cluster.ids <- c("Immature Neurons ", "RGP1", "Pericytes", "Layer I Neurons")
+seurat_cluster1@active.ident <- plyr::mapvalues(seurat_cluster1@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+DimPlot(seurat_cluster1)
+```
+
+```{r}
+DefaultAssay(seurat_cluster1) <- "RNA"
+data <- seurat_cluster1@meta.data
+data$UMAP1 <- Embeddings(seurat_cluster1 , 'umap')[,1]
+data$UMAP2 <- Embeddings(seurat_cluster1 , 'umap')[,2]
+data$PC1 <- Embeddings(seurat_cluster1 , 'pca')[,1]
+data$PC2 <- Embeddings(seurat_cluster1 , 'pca')[,2]
+data <-tidyr::separate(data, Barcode, c("CellID"), sep="-", extra="merge")
+data$Barcode <- rownames(data)
+data$Barcode <- gsub("-1","x", data$Barcode)
+data$Barcode <-paste0("Mix-SC:", data$Barcode)
+data$seurat_clusters <- gsub("0","Immature Neurons", data$seurat_clusters )
+data$seurat_clusters <- gsub("1","Radial Glial Cells", data$seurat_clusters )
+data$seurat_clusters <- gsub("2","Pericytes", data$seurat_clusters )
+data$seurat_clusters  <- gsub("3","Layer I Neurons", data$seurat_clusters )
+annotation <- data.frame(CellID = c("Bar1", "Bar2", "Bar3", "Bar4","Negative", "Doublet"),
+                         "Group" = c("Control", "Control", "Treatment", "Treatment","Negative", "Doublet"))
+data <- dplyr::left_join(data, annotation, by="CellID")
+
+write.csv(data, file=paste0("../seurat_metadata_cluster1.csv"), quote=F,
+          row.names = F)
+write.csv(rownames(seurat_cluster1), file="../seurat_genes_cluster1.csv", quote=F,
+          row.names = F)
+
+#Control and Mercury Split
+data_con1  <- filter(data, Group == "Control")
+data_merc1 <- filter(data, Group == "Treatment")
+
+write.csv(data_con1, file=paste0("../Control_mix_metadata_cluster1.csv"), quote=F,
+          row.names = F)
+
+write.csv(data_merc1, file=paste0("../Mercury_mix_metadata_cluster1.csv"), quote=F,
+          row.names = F)
+```
+
+
+
