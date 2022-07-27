@@ -1,0 +1,118 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+#Load 
+```{r}
+seurat <- readRDS("/Users/allisonloan/Documents/PhD Work/Single Cell seq Analysis/seurat_processed.rds")
+```   
+
+```{r}
+library(Seurat)
+library(deMULTIplex)
+library(dplyr)
+library(tidyverse)
+library(annotate)
+library(ggplot2)
+```
+
+```{r}
+my_levels<-c(3,2,5,1,0,4,8,6,7,9)
+seurat@active.ident <- factor(seurat@active.ident, levels = my_levels)
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7,8,9)
+new.cluster.ids <- c("Neurons", "Transitional Cells", "RGP", "RGP", "Neurons", "Intermediate Progenitors", "Interneurons", "Endothelial Cells", "Layer I Neurons", "Pericytes/Endothelial Cells")
+seurat@active.ident <- plyr::mapvalues(x = seurat@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+```
+
+#Subset transitional cells
+```{r}
+seurat_clusterT <- subset(seurat,idents=c("Transitional Cells"))
+seurat_clusterT <- SCTransform(seurat_clusterT, vars.to.regress="percent.mito")
+seurat_clusterT <- RunPCA(seurat_clusterT, verbose=F)
+seurat_clusterT <- RunUMAP(seurat_clusterT, dims=1:30)
+seurat_clusterT <- FindNeighbors(seurat_clusterT, dims=1:30)
+seurat_clusterT <- FindClusters(seurat_clusterT, resolution=0.2)
+seurat_clusterT <- subset(seurat_clusterT, Barcode == "Bar1" | Barcode== "Bar2"| Barcode== "Bar3"| Barcode== "Bar4")
+```
+
+#Subset out transitional cells
+```{r}
+seurat <- subset(seurat,idents=c("Neurons", "RGP", "RGP", "Neurons", "Intermediate Progenitors", "Interneurons", "Endothelial Cells", "Layer I Neurons", "Pericytes/Endothelial Cells"))
+seurat <- subset(seurat, Barcode == "Bar1" | Barcode== "Bar2"| Barcode== "Bar3"| Barcode== "Bar4")
+DimPlot(seurat)
+```
+
+#Label cell populations and create feature plot for total population (without transitional cells)
+```{r}
+genes <- c("Eomes", "Sstr2", "Gadd45g", "Mfap4")
+seurat[["IP"]] <- colMeans(as.matrix(seurat@assays$RNA@data[genes,]))
+genes <- c("Sox2", "Fabp7", "Pax6", "Hes1", "Hes5")
+seurat[["RG"]] <- colMeans(as.matrix(seurat@assays$RNA@data[genes,]))
+genes <- c("Tubb3", "Neurod1", "Sox11", "Neurod6","Dcx", "Bcl11b", "Sox5")
+seurat[["Neuron"]] <- colMeans(as.matrix(seurat@assays$RNA@data[genes,]))
+
+FeaturePlot(seurat,features = c("RG", "Neuron"),pt.size = 2, blend = T, min.cutoff = 0, max.cutoff = 5, blend.threshold = 0.5)
+
+FeaturePlot(seurat,features = c("RG", "IP"),pt.size = 2, blend = T, min.cutoff = 0, max.cutoff = 5, blend.threshold = 0.5)
+
+FeaturePlot(seurat,features = c("IP", "Neuron"),pt.size = 2, blend = T, min.cutoff = 0, max.cutoff = 5, blend.threshold = 0.5) 
+```
+
+#Label cell populations and create feature plot for transitional cell population
+```{r}
+genes <- c("Eomes", "Sstr2", "Gadd45g", "Mfap4")
+seurat_clusterT[["IP"]] <- colMeans(as.matrix(seurat_clusterT@assays$RNA@data[genes,]))
+genes <- c("Sox2", "Fabp7", "Pax6", "Hes1", "Hes5")
+seurat_clusterT[["RG"]] <- colMeans(as.matrix(seurat_clusterT@assays$RNA@data[genes,]))
+genes <- c("Tubb3", "Neurod1", "Sox11", "Neurod6","Dcx", "Bcl11b", "Sox5")
+seurat_clusterT[["Neuron"]] <- colMeans(as.matrix(seurat_clusterT@assays$RNA@data[genes,]))
+
+FeaturePlot(seurat_clusterT,features = c("RG", "Neuron"),pt.size = 2, blend = T, min.cutoff = 0, max.cutoff = 5, blend.threshold = 0.5)
+
+FeaturePlot(seurat_clusterT,features = c("RG", "IP"),pt.size = 2, blend = T, min.cutoff = 0, max.cutoff = 5, blend.threshold = 0.5)
+
+FeaturePlot(seurat_clusterT,features = c("IP", "Neuron"),pt.size = 2, blend = T, min.cutoff = 0, max.cutoff = 5, blend.threshold = 0.5) 
+```
+
+#Total population x.cells/all.cells.incluster
+```{r}
+RG.cutoff <- 1
+Neuron.cutoff <- 1
+IP.cutoff <-1
+
+IP.cells <- sum(FetchData(seurat, vars = "IP")>IP.cutoff)
+RG.cells <- sum(FetchData(seurat, vars = "RG")>RG.cutoff)
+Neuron.cells <- sum(FetchData(seurat, vars = "Neuron")>Neuron.cutoff)
+
+RG_Neuron.cells <-sum(FetchData(seurat, vars = "RG")>RG.cutoff & FetchData(seurat, vars = "Neuron")>Neuron.cutoff)
+RG_IP.cells <-sum(FetchData(seurat, vars = "RG")>RG.cutoff & FetchData(seurat, vars = "IP")>IP.cutoff)
+IP_Neuron.cells <-sum(FetchData(seurat, vars = "IP")>IP.cutoff & FetchData(seurat, vars = "Neuron")>Neuron.cutoff)
+all.cells.incluster <-sum(table(seurat@active.ident))
+
+RG.cells/all.cells.incluster*100
+IP.cells/all.cells.incluster*100
+Neuron.cells/all.cells.incluster*100
+RG_Neuron.cells/all.cells.incluster*100
+RG_IP.cells/all.cells.incluster*100
+IP_Neuron.cells/all.cells.incluster*100
+```
+
+#Transitional cell population x.cells/all.cells.incluster
+```{r}
+IP.cells <- sum(FetchData(seurat_clusterT, vars = "IP")>IP.cutoff)
+RG.cells <- sum(FetchData(seurat_clusterT, vars = "RG")>RG.cutoff)
+Neuron.cells <- sum(FetchData(seurat_clusterT, vars = "Neuron")>Neuron.cutoff)
+
+RG_IP.cells <-sum(FetchData(seurat_clusterT, vars = "RG")>RG.cutoff & FetchData(seurat_clusterT, vars = "IP")>IP.cutoff)
+RG_Neuron.cells <-sum(FetchData(seurat_clusterT, vars = "RG")>RG.cutoff & FetchData(seurat_clusterT, vars = "Neuron")>Neuron.cutoff)
+IP_Neuron.cells <-sum(FetchData(seurat_clusterT, vars = "IP")>IP.cutoff & FetchData(seurat_clusterT, vars = "Neuron")>Neuron.cutoff)
+all.cells.incluster <-sum(table(seurat_clusterT@active.ident))
+
+RG.cells/all.cells.incluster*100
+IP.cells/all.cells.incluster*100
+Neuron.cells/all.cells.incluster*100
+RG_Neuron.cells/all.cells.incluster*100
+RG_IP.cells/all.cells.incluster*100
+IP_Neuron.cells/all.cells.incluster*100
+```

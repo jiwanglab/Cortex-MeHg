@@ -1,0 +1,94 @@
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+#Load Data
+```{r}
+seurat <- readRDS("../seurat_processed.rds")
+```
+
+
+#Fig4b
+```{r}
+my_levels<-c(3,2,5,1,0,4,8,6,7,9)
+seurat@active.ident <- factor(seurat@active.ident, levels = my_levels)
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7,8,9)
+new.cluster.ids <- c("Immature Neurons ", "Transitional Cells", "RGP2", "RGP1", "Mature Neurons", "Intermediate Progenitors", "Interneurons", "Endothelial Cells", "Layer I Neurons", "Pericytes/Endothelial Cells")
+seurat@active.ident <- plyr::mapvalues(x = seurat@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+Mixed  <- subset(seurat, Barcode == "Bar1" | Barcode== "Bar2"| Barcode== "Bar3"| Barcode== "Bar4")
+DimPlot(Mixed, label = F)+ theme(legend.text=element_text(size=20))
+cluster_markers_mixed <- FindAllMarkers(Mixed,
+                                  logfc.threshold = 0.5,
+                                  only.pos = T)
+```
+#Fig4c
+```{r}
+Mixed$Barcode <- gsub("Bar1","Control", Mixed$Barcode)
+Mixed$Barcode <- gsub("Bar2","Control", Mixed$Barcode)
+Mixed$Barcode <- gsub("Bar3","MeHg", Mixed$Barcode)
+Mixed$Barcode <- gsub("Bar4","MeHg", Mixed$Barcode)
+Mixed <- subset(Mixed, Barcode == "Control" | Barcode== "MeHg")
+DimPlot(Mixed, group.by = "Barcode", cols = c("red", "blue"), label=F)+ theme(legend.text=element_text(size=20))
+```
+
+#Fig4d
+```{r}
+genes <- c("Mki67", "Neurod1", "Gad2", "Pax6", "Bcl11bb", "Cldn5", "Eomes", "Reln", "Rgs5")
+p1 <- FeaturePlot(Mixed, features = genes)
+fix.sc <- scale_color_gradientn(colours = c('lightgrey', 'blue'),  limits = c(0, 3.5))
+p2 <- lapply(p1, function (x) x + fix.sc)
+CombinePlots(p2)
+```
+
+#Fig4e
+```{r}
+prop.table(table(Idents(Control)))
+prop.table(table(Idents(Mercury)))
+```
+
+#Fig4f
+```{r}
+seurat_cluster1 <- subset(seurat,idents=c("Transitional Cells"))
+seurat_cluster1 <- SCTransform(seurat_cluster1, vars.to.regress="percent.mito")
+seurat_cluster1 <- RunPCA(seurat_cluster1, verbose=F)
+seurat_cluster1 <- RunUMAP(seurat_cluster1, dims=1:30)
+seurat_cluster1 <- FindNeighbors(seurat_cluster1, dims=1:30)
+seurat_cluster1 <- FindClusters(seurat_cluster1, resolution=0.2)
+seurat_cluster1  <- subset(seurat_cluster1, Barcode == "Bar1" | Barcode== "Bar2"| Barcode== "Bar3"| Barcode== "Bar4")
+my_levels<-c(0,1,3,2)
+seurat_cluster1@active.ident <- factor(seurat_cluster1@active.ident, levels = my_levels)
+current.cluster.ids <- c(0, 1, 2, 3)
+new.cluster.ids <- c("RGP1","Immature Neurons ", "Pericytes", "Layer I Neurons")
+seurat_cluster1@active.ident <- plyr::mapvalues(x = seurat_cluster1@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+DimPlot(seurat_cluster1, label = F)+ theme(legend.text=element_text(size=20))
+```
+
+#Fig4g
+```{r}
+seurat_cluster1$Barcode <- gsub("Bar1","Control", seurat_cluster1$Barcode)
+seurat_cluster1$Barcode <- gsub("Bar2","Control", seurat_cluster1$Barcode)
+seurat_cluster1$Barcode <- gsub("Bar3","MeHg",seurat_cluster1$Barcode)
+seurat$Barcode <- gsub("Bar4","MeHg", seurat_cluster1$Barcode)
+seurat_cluster1<- subset(seurat_cluster1, Barcode == "Control" | Barcode== "MeHg")
+DimPlot(seurat_cluster1, group.by = "Barcode", cols = c("red", "blue"), label=F)+ theme(legend.text=element_text(size=20))
+```
+
+#Fig4h
+```{r}
+cluster_markers_1 <- FindAllMarkers(seurat_cluster1,
+                                  logfc.threshold = 0.5,
+                                  only.pos = T)
+top10_merge <- cluster_markers_1 %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+avg <- AverageExpression(seurat_cluster1, features = NULL, add.ident = NULL, return.seurat = TRUE, verbose = TRUE)
+DoHeatmap(avg, features = top10_merge$gene, draw.lines = 0, label = F)+ theme(legend.text=element_text(size=20))
+```
+
+#Fig4f
+```{r}
+prop.table(table(Idents(Control)))
+prop.table(table(Idents(Mercury)))
+```

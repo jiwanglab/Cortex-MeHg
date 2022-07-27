@@ -1,0 +1,306 @@
+
+```{r}
+library(Seurat)
+library(deMULTIplex)
+library(dplyr)
+library(tidyverse)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("ShortRead")
+install.packages("remotes")
+memory.limit(size=16000000000)
+devtools::install_github('chris-mcginnis-ucsf/MULTI-seq')
+remotes::install_github("chris-mcginnis-ucsf/MULTI-seq",force = TRUE)
+```
+
+# Initial processing
+
+```{r}
+mix_mat <- Read10X("../filtered_feature_bc_matrix//")
+```
+
+```{r}
+seurat <- CreateSeuratObject(mix_mat,
+                             min.cells = 10,
+                             min.features = 200,
+                             project = "Mix")
+```
+
+```{r}
+seurat <- subset(seurat, 
+               subset = nFeature_RNA > 300 & nCount_RNA< 20000)
+seurat <- subset(seurat, 
+               subset =   nFeature_RNA > 700 | (nCount_RNA < 2500 & nFeature_RNA < 700))
+hist(seurat@meta.data$nCount_RNA, breaks=100)
+qplot(x=nFeature_RNA, y=nCount_RNA, data=seurat@meta.data)
+```
+
+```{r}
+seurat[["percent.mito"]] <- PercentageFeatureSet(seurat, pattern = "^mt-")
+VlnPlot(seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), pt.size=0.1,
+        ncol = 3)
+```
+
+```{r}
+seurat <- subset(seurat, subset = percent.mito < 10)
+```
+
+```{r}
+seurat <- NormalizeData(seurat)
+seurat <- FindVariableFeatures(seurat)
+seurat <- ScaleData(seurat)
+seurat <- RunPCA(seurat, verbose=F)
+seurat <- RunUMAP(seurat, dims=1:35)
+```
+
+```{r}
+DimPlot(seurat)
+```
+
+#You will need to remove this for scvelo
+```{r}
+mix_keep <- colnames(seurat)
+mix_keep <- gsub("-1", "", mix_keep)
+```
+
+# Demultiplexing
+```{r}
+bar.ref <- read.csv("../LMOlist.csv", header=F)$V1
+```
+
+## Quantify barcodes from fastq files
+```{r}
+readTable <- MULTIseq.preProcess(R1 = "../Mix_Barcode_R1_paired.fastq (1).gz",
+                                 R2 = "../Mix_Barcode_R2_paired.fastq (1).gz",
+                                 cellIDs = mix_keep)
+bar_table <- MULTIseq.align(readTable, mix_keep, bar.ref)
+write.csv(bar_table, file="../barcode_counts.csv", quote=F)
+
+```
+```{r}
+bar_table<-read.csv(file="../barcode_counts.csv", header = TRUE, row.names = 1)
+```
+
+#Used barcodes 25-28
+```{r}
+mix_tsne <- barTSNE(bar_table[,25:28])
+write.csv(mix_tsne, file="../mix_tsne.csv", quote=F)
+```
+
+```{r}
+mix_tsne<-read.csv(file="../mix_tsne.csv", header = TRUE)
+```
+
+```{r}
+mix_bar <- (bar_table[,25:28] / bar_table$nUMI) * 100 #convert to percentage
+mix_bar <- log1p(mix_bar)
+```
+
+```{r}
+hist(mix_bar$Bar25, breaks=100)
+hist(mix_bar$Bar26, breaks=100)
+hist(mix_bar$Bar27, breaks=100)
+hist(mix_bar$Bar28, breaks=100)
+abline(v=3.65)
+```
+
+```{r}
+df <- data.frame(Bar25 = rep(0, nrow(bar_table)),
+                 Bar26 = 0,
+                 Bar27 = 0,
+                 Bar28 = 0)
+
+df$Bar25[mix_bar$Bar25 > 3.65] <- 1 
+df$Bar26[mix_bar$Bar26 > 3.65] <- 1
+df$Bar27[mix_bar$Bar27 > 3.45] <- 1
+df$Bar28[mix_bar$Bar28 > 2.8] <- 1 
+
+rownames(df) <- rownames(bar_table)
+```
+
+```{r}
+temp <- as.matrix(mix_tsne[,3:6])
+temp[temp<0] <- 0
+temp <- as.data.frame(temp)
+temp$TSNE1 <- mix_tsne$TSNE1
+temp$TSNE2 <- mix_tsne$TSNE2
+
+
+for (LMO in colnames(mix_tsne)[3:6]){
+  png(filename = paste0("../figs/",LMO,".png"), width = 700, height = 600)
+  p <- ggplot(data=temp, aes_string(x="TSNE1",y="TSNE2",color=LMO)) + geom_point() +
+    scale_color_gradient(low="lightgrey",high="red") +
+    theme_void()
+  print(p)
+  dev.off()
+}
+```
+
+```{r}
+assignSample <- function(barcode_counts){
+  if(sum(barcode_counts) == 0){
+    return("Negative")
+  } else if(sum(barcode_counts) > 1){
+    return("Doublet")
+  } else if (sum(barcode_counts) == 1){
+    return(paste0("Bar", which(barcode_counts == 1)))
+  }
+}
+
+df$Annotation <- apply(as.matrix(df), 1, assignSample)
+```
+
+```{r}
+df$cell_count <- factor(rowSums(df[,1:4]))
+df$TSNE1 <- temp$TSNE1
+df$TSNE2 <- temp$TSNE2
+```
+
+#Ext Fig4e
+```{r}
+df$Annotation <- gsub("Bar1","Singlet", df$Annotation)
+df$Annotation <- gsub("Bar2","Singlet", df$Annotation)
+df$Annotation <- gsub("Bar3","Singlet", df$Annotation)
+df$Annotation <- gsub("Bar4","Singlet", df$Annotation)
+ggplot(df, aes(x=TSNE1, y=TSNE2)) +
+  geom_point(size=0.1, aes(color=Annotation)) +
+  theme_classic()
+```
+
+#Ext Fig4a-d
+```{r}
+samples <- unique(df$Annotation)
+plotSampleTSNE <- function(sample){
+  data <- df
+  data$Sample <- "Other"
+  data$Sample[df$Annotation==sample] <- sample
+  sample_plot <- ggplot(data, aes(x=TSNE1, y=TSNE2)) +
+    geom_point(size=0.25, alpha=0.5, aes(color=Sample)) +
+    scale_color_manual(values=c("red", "lightgrey")) +
+    theme_void()
+  ggsave(sample_plot, file=paste0("../figs/", 
+         sample,".png"), width=5, height=3.2)
+}
+```
+
+
+```{r}
+lapply(samples, plotSampleTSNE)
+```
+
+
+```{r}
+write.csv(df, file="../mix_annotations_tsne.csv", quote=F)
+```
+
+```{r}
+table(df$cell_count)
+```
+
+```{r}
+seurat$Barcode <- df$Annotation
+```
+
+#Extra doublet annotation just in case
+```{r}
+writeLines('PATH="${RTOOLS40_HOME}\\usr\\bin;${PATH}"', con = "~/.Renviron")
+
+Sys.which("make")
+
+BiocManager::install("plger/scDblFinder")
+
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+
+  install.packages("BiocManager")
+
+.libPaths()
+
+install.packages("BiocManager")
+
+BiocManager::install("SingleCellExperiment", lib = "C:/Users/jiwang/Documents/R/win-library/4.0")
+
+source("https://bioconductor.org/biocLite.R")
+biocLite("scuttle")
+BiocManager::install("scuttle")
+remotes::install_github("LTLA/scuttle")
+
+```
+
+
+```{r}
+library(scDblFinder)
+library(SingleCellExperiment)
+```
+
+```{r}
+sce <- as.SingleCellExperiment(seurat)
+```
+
+```{r}
+sce <- scDblFinder(sce)
+```
+
+```{r}
+seurat$Doublet <- sce$scDblFinder.class
+```
+
+```{r}
+seurat <- subset(seurat, subset = Doublet == "singlet")
+```
+
+```{r}
+memory.limit(size=16000000000)
+seurat <- SCTransform(seurat, vars.to.regress="percent.mito")
+seurat <- RunPCA(seurat, verbose=F)
+seurat <- RunUMAP(seurat, dims=1:30)
+seurat <- FindNeighbors(seurat, dims=1:30)
+seurat <- FindClusters(seurat, resolution=0.2) 
+```
+
+```{r}
+cluster_markers <- FindAllMarkers(seurat,
+                                    logfc.threshold = 0.5,
+                                    only.pos = T)
+colnames(seurat)[seurat$seurat_clusters == 0]
+
+cluster_markers %>%
+    group_by(cluster)%>%
+    top_n(10,avg_logFC)
+write.csv(cluster_markers, file="../cluster_markers.csv", quote=F)
+```
+
+#Remove Blood Cell Clusters
+```{r}
+seurat <- subset(seurat,idents=c(0,1,2,3,4,5,6,7,10))
+seurat <- SCTransform(seurat, vars.to.regress="percent.mito")
+seurat <- RunPCA(seurat, verbose=F)
+seurat <- RunUMAP(seurat, dims=1:30)
+seurat <- FindNeighbors(seurat, dims=1:30)
+seurat <- FindClusters(seurat, resolution=0.2)
+```
+
+#Ext Fig4f
+```{r}
+seurat <- CellCycleScoring(seurat, s.features = cc.genes.updated.2019$s.genes,
+                           g2m.features = cc.genes.updated.2019$g2m.genes)
+DimPlot(seurat, group.by="Phase")
+```
+
+#Final File 
+```{r}
+DefaultAssay(seurat) <- "RNA"
+saveRDS(seurat, file="../seurat_processed.rds")
+```
+
+```{r}
+seurat <- readRDS(file="../seurat_processed.rds")
+```
+
+```{r}
+seurat <- readRDS("../seurat_processed.rds")
+```
+
+
+
+

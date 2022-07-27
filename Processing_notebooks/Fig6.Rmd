@@ -1,0 +1,71 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+```{r}
+library(Seurat)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+#Load Data
+```{r}
+seurat <- readRDS("seurat_processed.rds")
+```
+
+
+#Mixed Data
+```{r}
+my_levels<-c(3,2,5,1,0,4,8,6,7,9)
+seurat@active.ident <- factor(seurat@active.ident, levels = my_levels)
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7,8,9)
+new.cluster.ids <- c("Immature Neurons ", "Transitional Cells", "RGP2", "RGP1", "Mature Neurons", "Intermediate Progenitors", "Interneurons", "Endothelial Cells", "Layer I Neurons", "Perycites/Endothelial Cells")
+seurat@active.ident <- plyr::mapvalues(x = seurat@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+Mixed <- subset(seurat, Barcode == "Bar1" | Barcode== "Bar2" | Barcode== "Bar3" | Barcode== "Bar4")
+DimPlot(Mixed, label=F)
+```
+
+#Split Into Control
+```{r}
+Control <- subset(seurat, Barcode == "Bar1" | Barcode== "Bar2")
+```
+
+#Split into Mercury
+```{r}
+Mercury <- subset(seurat, Barcode == "Bar3" | Barcode== "Bar4")
+```
+
+#Fig 6a
+```{r}
+creb_genes <- c("Jund", "Fos", "Dusp1", "Egr1")
+DotPlot(Control, features = creb_genes)
+creb_genes <- c("Jund", "Fos", "Dusp1", "Egr1")
+DotPlot(Mercury, features = creb_genes)
+```
+
+##Fig 6b
+
+```{r}
+Mixed$Barcode <- gsub("Bar1","Control", Mixed$Barcode)
+Mixed$Barcode <- gsub("Bar2","Control", Mixed$Barcode)
+Mixed$Barcode <- gsub("Bar3","MeHg", Mixed$Barcode)
+Mixed$Barcode <- gsub("Bar4","MeHg", Mixed$Barcode)
+VlnPlot(Mixed, c("Fos"), idents =  c("RGP1","RGP2"), split.by="Barcode", combine=T, cols=c("WHITE","GREY"))
+```
+
+```{r}
+VlnPlot(Mixed, c("Jund"), idents =  c("RGP1","RGP2"), split.by="Barcode", combine=T, cols=c("WHITE","GREY"))
+```
+
+
+```{r}
+genes <- c("Cwc22")
+VlnPlot(Mixed, c("Ank3"), idents =  c("1","2", "3"), split.by="Barcode", combine=T, cols=c("WHITE","GREY"))
+DotPlot(Mixed, split.by = "Barcode", features = "Pten")
+
+```
+
+
+
